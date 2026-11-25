@@ -1,0 +1,7 @@
+{
+  "name": "toko-frontend",
+  "private": true,
+  "scripts": {
+    "dev": "npx http-server . -p 8080 -c-1 -P http://127.0.0.1:3000"
+  }
+}

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pasar Nusa — Toko Online</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/">Pasar Nusa</a>
+  <input id="q" type="search" placeholder="Cari produk" aria-label="Cari produk">
+  <nav>
+    <button id="btnOrders" class="link" hidden>Pesanan saya</button>
+    <button id="btnAuth" class="link">Masuk</button>
+    <button id="btnCart" class="cartbtn">Keranjang <span id="cartCount">0</span></button>
+  </nav>
+</header>
+<main>
+  <section class="filters">
+    <div id="cats" class="cats" role="tablist"></div>
+    <select id="sort" aria-label="Urutkan">
+      <option value="new">Terbaru</option><option value="cheap">Harga terendah</option><option value="expensive">Harga tertinggi</option>
+    </select>
+  </section>
+  <section id="grid" class="grid" aria-live="polite"></section>
+  <div id="pager" class="pager"></div>
+</main>
+
+<aside id="cart" class="drawer" hidden aria-label="Keranjang">
+  <div class="dhead"><h2>Keranjang</h2><button data-close class="link">Tutup</button></div>
+  <div id="cartItems"></div>
+  <form id="checkout" class="stack">
+    <div id="cartTotal" class="total"></div>
+    <label>Alamat pengiriman<textarea name="address" rows="3" required></textarea></label>
+    <button class="primary">Buat pesanan</button>
+  </form>
+</aside>
+
+<dialog id="authDlg">
+  <form id="authForm" class="stack" method="dialog">
+    <h2 id="authTitle">Masuk</h2>
+    <label id="nameRow" hidden>Nama<input name="name" autocomplete="name"></label>
+    <label>Email<input name="email" type="email" required autocomplete="email"></label>
+    <label>Password<input name="password" type="password" minlength="8" required autocomplete="current-password"></label>
+    <p id="authErr" class="err"></p>
+    <button class="primary">Lanjut</button>
+    <button type="button" id="authSwitch" class="link">Belum punya akun? Daftar</button>
+    <button type="button" data-close class="link">Batal</button>
+  </form>
+</dialog>
+
+<dialog id="ordDlg"><div class="stack"><h2>Pesanan saya</h2><div id="ordList"></div><button data-close class="link">Tutup</button></div></dialog>
+<div id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>

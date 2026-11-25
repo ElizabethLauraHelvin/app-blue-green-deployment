@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    image: toko-backend
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?isi JWT_SECRET di file .env}
+    volumes:
+      - shop-data:/data        # database SQLite + foto upload
+  frontend:
+    build: ./frontend
+    image: toko-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+volumes:
+  shop-data:
