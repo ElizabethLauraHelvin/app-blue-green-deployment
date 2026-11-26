@@ -5,6 +5,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'ecommerce-app/backend/**'
+      - 'ecommerce-app/frontend/**'
+      - 'ecommerce-app/k8s/**'
+      - 'ecommerce-app/infrastucture/**'
+      - 'ecommerce-app/infrastructure/**'
+      - '.github/workflows/deploy-app-ecommerce.yml'
 
   workflow_dispatch:
 
@@ -27,178 +34,63 @@ jobs:
       CLUSTER: bluegreen-cluster
 
     steps:
+
       # ==========================================
       # 1. CHECKOUT
       # ==========================================
 
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # ==========================================
-      # 2. CONNECT TO KUBERNETES
+      # 2. CHECK KUBERNETES
       # ==========================================
 
       - name: Check Kubernetes Connection
         run: |
+          set -e
+
           kubectl config use-context "k3d-${CLUSTER}"
+
           kubectl cluster-info
+
           kubectl get nodes
 
       # ==========================================
-      # 3. DETECT CHANGES
+      # 3. VERIFY DOCKER HUB SECRETS
       # ==========================================
 
-      - name: Detect Changes
-        id: changes
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
+      - name: Verify Docker Hub Credentials
         run: |
-          INITIAL=false
-          BACKEND=false
-          FRONTEND=false
-          INFRA=false
-          DEPLOY=false
-
-          BACKEND_EXISTS=$(kubectl get deployment backend \
-            -n "$NAMESPACE" --ignore-not-found -o name 2>/dev/null || true)
-
-          FRONTEND_EXISTS=$(kubectl get deployment frontend \
-            -n "$NAMESPACE" --ignore-not-found -o name 2>/dev/null || true)
-
-          # First deployment
-          if [[ -z "$BACKEND_EXISTS" || -z "$FRONTEND_EXISTS" ]]; then
-            INITIAL=true
-            BACKEND=true
-            FRONTEND=true
-            INFRA=true
-            DEPLOY=true
-
-          # Manual execution: rebuild both images
-          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            BACKEND=true
-            FRONTEND=true
-            INFRA=true
-            DEPLOY=true
-
-          # Automatic push
-          else
-            if [[ "$BEFORE" =~ ^0+$ ]]; then
-              BACKEND=true
-              FRONTEND=true
-              INFRA=true
-              DEPLOY=true
-            else
-              CHANGED_FILES=$(git diff --name-only "$BEFORE" "$CURRENT_SHA")
-
-              echo "===== CHANGED FILES ====="
-              echo "$CHANGED_FILES"
-
-              if echo "$CHANGED_FILES" | grep -q '^ecommerce-app/backend/'; then
-                BACKEND=true
-                DEPLOY=true
-              fi
-
-              if echo "$CHANGED_FILES" | grep -q '^ecommerce-app/frontend/'; then
-                FRONTEND=true
-                DEPLOY=true
-              fi
-
-              if echo "$CHANGED_FILES" | grep -q '^ecommerce-app/k8s/'; then
-                INFRA=true
-                DEPLOY=true
-              fi
-            fi
+          if [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "ERROR: DOCKERHUB_USERNAME is missing"
+            exit 1
           fi
 
-          echo "initial=$INITIAL" >> "$GITHUB_OUTPUT"
-          echo "backend=$BACKEND" >> "$GITHUB_OUTPUT"
-          echo "frontend=$FRONTEND" >> "$GITHUB_OUTPUT"
-          echo "infra=$INFRA" >> "$GITHUB_OUTPUT"
-          echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
-
-          echo "===== DEPLOYMENT DECISION ====="
-          echo "Initial deployment: $INITIAL"
-          echo "Backend changed: $BACKEND"
-          echo "Frontend changed: $FRONTEND"
-          echo "Infrastructure changed: $INFRA"
-          echo "Deploy required: $DEPLOY"
+          echo "Docker Hub username configured."
 
       # ==========================================
-      # 4. RESOLVE IMAGE VERSIONS
-      # ==========================================
-
-      - name: Resolve Image Versions
-        id: versions
-        if: steps.changes.outputs.deploy == 'true'
-        run: |
-          get_current_tag() {
-            local deployment="$1"
-            local container="$2"
-
-            local image
-
-            image=$(kubectl get deployment "$deployment" \
-              -n "$NAMESPACE" \
-              -o jsonpath="{.spec.template.spec.containers[?(@.name=='$container')].image}" \
-              2>/dev/null || true)
-
-            if [[ -z "$image" ]]; then
-              echo ""
-            else
-              echo "${image##*:}"
-            fi
-          }
-
-          CURRENT_BACKEND=$(get_current_tag backend backend)
-          CURRENT_FRONTEND=$(get_current_tag frontend frontend)
-
-          if [[ "${{ steps.changes.outputs.backend }}" == "true" || -z "$CURRENT_BACKEND" ]]; then
-            BACKEND_TAG="$IMAGE_TAG"
-          else
-            BACKEND_TAG="$CURRENT_BACKEND"
-          fi
-
-          if [[ "${{ steps.changes.outputs.frontend }}" == "true" || -z "$CURRENT_FRONTEND" ]]; then
-            FRONTEND_TAG="$IMAGE_TAG"
-          else
-            FRONTEND_TAG="$CURRENT_FRONTEND"
-          fi
-
-          echo "backend_tag=$BACKEND_TAG" >> "$GITHUB_OUTPUT"
-          echo "frontend_tag=$FRONTEND_TAG" >> "$GITHUB_OUTPUT"
-
-          echo "Backend tag: $BACKEND_TAG"
-          echo "Frontend tag: $FRONTEND_TAG"
-
-      # ==========================================
-      # 5. SETUP DOCKER BUILDX
+      # 4. SETUP DOCKER BUILDX
       # ==========================================
 
       - name: Set up Docker Buildx
-        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true'
         uses: docker/setup-buildx-action@v3
 
       # ==========================================
-      # 6. LOGIN DOCKER HUB
+      # 5. LOGIN DOCKER HUB
       # ==========================================
 
       - name: Login to Docker Hub
-        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ==========================================
-      # 7. BUILD AND PUSH BACKEND
+      # 6. BUILD BACKEND IMAGE
       # ==========================================
 
       - name: Build and Push Backend Image
-        if: steps.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./ecommerce-app/backend
@@ -211,11 +103,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       # ==========================================
-      # 8. BUILD AND PUSH FRONTEND
+      # 7. BUILD FRONTEND IMAGE
       # ==========================================
 
       - name: Build and Push Frontend Image
-        if: steps.changes.outputs.frontend == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./ecommerce-app/frontend
@@ -228,20 +119,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       # ==========================================
-      # 9. PREPARE KUBERNETES NAMESPACE
+      # 8. CREATE KUBERNETES NAMESPACE
       # ==========================================
 
       - name: Prepare Kubernetes Namespace
-        if: steps.changes.outputs.deploy == 'true'
         run: |
           kubectl apply -f ecommerce-app/k8s/namespace.yaml
 
       # ==========================================
-      # 10. PREPARE JWT SECRET
+      # 9. CREATE JWT SECRET
       # ==========================================
 
       - name: Prepare JWT Secret
-        if: steps.changes.outputs.deploy == 'true'
         run: |
           if ! kubectl get secret ecommerce-secret \
             -n "$NAMESPACE" >/dev/null 2>&1; then
@@ -251,16 +140,16 @@ jobs:
               --from-literal=JWT_SECRET="$(openssl rand -hex 32)"
 
             echo "JWT Secret created."
+
           else
             echo "JWT Secret already exists. Keeping existing secret."
           fi
 
       # ==========================================
-      # 11. PREPARE PERSISTENT STORAGE
+      # 10. PREPARE PERSISTENT STORAGE
       # ==========================================
 
       - name: Prepare Persistent Storage
-        if: steps.changes.outputs.deploy == 'true'
         run: |
           kubectl apply -f ecommerce-app/k8s/storage.yaml
 
@@ -271,27 +160,34 @@ jobs:
             --timeout=180s
 
       # ==========================================
+      # 11. PREPARE APPLICATION MANIFEST
+      # ==========================================
+
+      - name: Prepare Application Manifest
+        run: |
+          sed \
+            -e "s|__DOCKERHUB_USERNAME__|${DOCKERHUB_USERNAME}|g" \
+            -e "s|__BACKEND_TAG__|${IMAGE_TAG}|g" \
+            -e "s|__FRONTEND_TAG__|${IMAGE_TAG}|g" \
+            ecommerce-app/k8s/app.yaml > /tmp/ecommerce-app.yaml
+
+          echo "===== GENERATED IMAGE REFERENCES ====="
+
+          grep "image:" /tmp/ecommerce-app.yaml
+
+      # ==========================================
       # 12. DEPLOY APPLICATION
       # ==========================================
 
-      - name: Deploy Application to k3d
-        if: steps.changes.outputs.deploy == 'true'
-        env:
-          BACKEND_TAG: ${{ steps.versions.outputs.backend_tag }}
-          FRONTEND_TAG: ${{ steps.versions.outputs.frontend_tag }}
+      - name: Deploy Application to Kubernetes
         run: |
+          set -e
+
           echo "======================================"
           echo "DEPLOY ECOMMERCE APPLICATION"
           echo "======================================"
 
-          echo "Backend image: $DOCKERHUB_USERNAME/ecommerce-app-backend:$BACKEND_TAG"
-          echo "Frontend image: $DOCKERHUB_USERNAME/ecommerce-app-frontend:$FRONTEND_TAG"
-
-          sed \
-            -e "s|__DOCKERHUB_USERNAME__|${DOCKERHUB_USERNAME}|g" \
-            -e "s|__BACKEND_TAG__|${BACKEND_TAG}|g" \
-            -e "s|__FRONTEND_TAG__|${FRONTEND_TAG}|g" \
-            ecommerce-app/k8s/app.yaml > /tmp/ecommerce-app.yaml
+          echo "Image version: ${IMAGE_TAG}"
 
           kubectl apply -f /tmp/ecommerce-app.yaml
 
@@ -302,7 +198,6 @@ jobs:
       # ==========================================
 
       - name: Verify Backend Rollout
-        if: steps.changes.outputs.deploy == 'true'
         run: |
           kubectl rollout status deployment/backend \
             -n "$NAMESPACE" \
@@ -313,18 +208,16 @@ jobs:
       # ==========================================
 
       - name: Verify Frontend Rollout
-        if: steps.changes.outputs.deploy == 'true'
         run: |
           kubectl rollout status deployment/frontend \
             -n "$NAMESPACE" \
             --timeout=180s
 
       # ==========================================
-      # 15. VERIFY KUBERNETES RESOURCES
+      # 15. VERIFY DEPLOYMENT
       # ==========================================
 
-      - name: Verify Deployment
-        if: steps.changes.outputs.deploy == 'true'
+      - name: Verify Kubernetes Resources
         run: |
           echo "===== PODS ====="
           kubectl get pods -n "$NAMESPACE" -o wide
@@ -338,26 +231,16 @@ jobs:
           echo "===== PVC ====="
           kubectl get pvc -n "$NAMESPACE"
 
-          echo "===== IMAGE VERSIONS ====="
+          echo "===== DEPLOYED IMAGES ====="
           kubectl get deployments -n "$NAMESPACE" \
             -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\n"}{end}'
 
           echo "======================================"
-          echo "DEPLOYMENT COMPLETED"
+          echo "DEPLOYMENT SUCCESSFUL"
           echo "======================================"
 
       # ==========================================
-      # 16. NO DEPLOYMENT REQUIRED
-      # ==========================================
-
-      - name: Skip Deployment
-        if: steps.changes.outputs.deploy != 'true'
-        run: |
-          echo "No application or Kubernetes changes detected."
-          echo "Deployment skipped."
-
-      # ==========================================
-      # 17. LOGOUT DOCKER HUB
+      # 16. LOGOUT DOCKER HUB
       # ==========================================
 
       - name: Logout Docker Hub
