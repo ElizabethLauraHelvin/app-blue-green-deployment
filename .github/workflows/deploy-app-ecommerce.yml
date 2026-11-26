@@ -1,4 +1,3 @@
-
 name: Deploy App Ecommerce
 
 on:
@@ -6,11 +5,11 @@ on:
     branches:
       - main
     paths:
-      - 'ecommerce-app/backend/**'
-      - 'ecommerce-app/frontend/**'
-      - 'ecommerce-app/k8s/**'
-      - 'ecommerce-app/infrastructure/nginx/**'
-      - '.github/workflows/deploy-app-ecommerce.yml'
+      - "ecommerce-app/backend/**"
+      - "ecommerce-app/frontend/**"
+      - "ecommerce-app/k8s/**"
+      - "ecommerce-app/infrastructure/nginx/**"
+      - ".github/workflows/deploy-app-ecommerce.yml"
 
   workflow_dispatch:
 
@@ -36,7 +35,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      
       - name: Detect Changed Folders
         id: filter
         uses: dorny/paths-filter@v3
@@ -64,10 +62,12 @@ jobs:
     name: Build, Push and Deploy
     needs: detect-changes
 
-    if: needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-changes.outputs.backend == 'true' ||
+      needs.detect-changes.outputs.frontend == 'true'
 
-    runs-on: [self-hosted, Linux, X64, k3d-vm]
-
+    runs-on: [self-hosted, Linux, X64]
     env:
       IMAGE_TAG: v${{ github.run_number }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
