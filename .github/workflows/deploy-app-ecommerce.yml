@@ -47,6 +47,18 @@ jobs:
             frontend:
               - 'ecommerce-app/frontend/**'
 
+      - name: Debug Detected Changes
+        run: |
+          echo "===== DETECTED CHANGES ====="
+          echo "Backend: ${{ steps.filter.outputs.backend }}"
+          echo "Frontend: ${{ steps.filter.outputs.frontend }}"
+
+          echo "===== COMMIT FILES ====="
+          git show --name-only --format="" HEAD
+
+          echo "===== REPOSITORY STRUCTURE ====="
+          ls -la
+          ls -la ecommerce-app/
 
   build-and-deploy:
     name: Build, Push and Deploy
