@@ -100,8 +100,8 @@ jobs:
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v6
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: ./ecommerce-app/backend
+          file: ./ecommerce-app/backend/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-backend:${{ env.IMAGE_TAG }}
@@ -116,8 +116,8 @@ jobs:
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v6
         with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
+          context: ./ecommerce-app/frontend
+          file: ./ecommerce-app/frontend/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-frontend:${{ env.IMAGE_TAG }}
