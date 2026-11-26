@@ -10,7 +10,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
-app.set('trust proxy', 1); // di belakang nginx (frontend)
+app.set('trust proxy', 1); 
 app.use(helmet());
 app.use(express.json({ limit: '100kb' }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
