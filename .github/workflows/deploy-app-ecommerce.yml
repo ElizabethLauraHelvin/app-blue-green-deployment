@@ -19,7 +19,7 @@ concurrency:
 jobs:
   detect-changes:
     name: Detect Application Changes
-    runs-on: [self-hosted, Linux, X64, k3d-vm]
+    runs-on: [self-hosted, Linux, X64]
 
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
