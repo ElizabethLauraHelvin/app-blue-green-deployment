@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ecommerce-data-pv
+spec:
+  capacity:
+    storage: 5Gi
+
+  accessModes:
+    - ReadWriteOnce
+
+  persistentVolumeReclaimPolicy: Retain
+
+  storageClassName: ecommerce-local
+
+  hostPath:
+    path: /mnt/ecommerce-data
+    type: Directory
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-bluegreen-cluster-server-0
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ecommerce-data-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteOnce
+
+  storageClassName: ecommerce-local
+
+  resources:
+    requests:
+      storage: 5Gi
+
+  volumeName: ecommerce-data-pv

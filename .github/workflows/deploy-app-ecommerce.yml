@@ -1,0 +1,151 @@
+
+name: Deploy App Ecommerce
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-app-ecommerce
+  cancel-in-progress: false
+
+jobs:
+  detect-changes:
+    name: Detect Application Changes
+    runs-on: [self-hosted, Linux, X64, k3d-vm]
+
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Folders
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  build-and-deploy:
+    name: Build, Push and Deploy
+    needs: detect-changes
+
+    if: needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true'
+
+    runs-on: [self-hosted, Linux, X64, k3d-vm]
+
+    env:
+      IMAGE_TAG: v${{ github.run_number }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
+    steps:
+      # =====================================
+      # 1. CHECKOUT
+      # =====================================
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # =====================================
+      # 2. DOCKER SETUP
+      # =====================================
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # =====================================
+      # 3. BUILD BACKEND IMAGE
+      # =====================================
+
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-backend:${{ env.IMAGE_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # =====================================
+      # 4. BUILD FRONTEND IMAGE
+      # =====================================
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-frontend:${{ env.IMAGE_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # =====================================
+      # 5. DEPLOY TO K3D
+      # =====================================
+
+      - name: Deploy to Kubernetes k3d
+        run: |
+          echo "=================================="
+          echo "DEPLOY APP ECOMMERCE"
+          echo "=================================="
+
+          echo "Image Version: ${IMAGE_TAG}"
+
+          kubectl config use-context k3d-bluegreen-cluster
+
+          kubectl cluster-info
+
+          IMAGE_TAG="${IMAGE_TAG}" \
+          DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME}" \
+          bash ./deploy.sh
+
+      # =====================================
+      # 6. VERIFY DEPLOYMENT
+      # =====================================
+
+      - name: Verify Kubernetes Deployment
+        run: |
+          echo "Checking Kubernetes resources..."
+
+          kubectl get deployments -n ecommerce
+
+          kubectl get pods -n ecommerce
+
+          kubectl get services -n ecommerce
+
+          kubectl rollout status deployment/backend \
+            -n ecommerce --timeout=180s
+
+          kubectl rollout status deployment/frontend \
+            -n ecommerce --timeout=180s
+
+          echo "=================================="
+          echo "DEPLOYMENT SUCCESSFUL"
+          echo "=================================="
