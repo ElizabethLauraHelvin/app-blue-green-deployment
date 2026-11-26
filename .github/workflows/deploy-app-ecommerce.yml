@@ -6,8 +6,13 @@ on:
     branches:
       - main
     paths:
-      - 'backend/**'
-      - 'frontend/**'
+      - 'ecommerce-app/backend/**'
+      - 'ecommerce-app/frontend/**'
+      - 'ecommerce-app/k8s/**'
+      - 'ecommerce-app/infrastructure/nginx/**'
+      - '.github/workflows/deploy-app-ecommerce.yml'
+
+  workflow_dispatch:
 
 permissions:
   contents: read
