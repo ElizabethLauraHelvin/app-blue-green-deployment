@@ -36,15 +36,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      
       - name: Detect Changed Folders
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             backend:
-              - 'backend/**'
+              - 'ecommerce-app/backend/**'
             frontend:
-              - 'frontend/**'
+              - 'ecommerce-app/frontend/**'
+
 
   build-and-deploy:
     name: Build, Push and Deploy
