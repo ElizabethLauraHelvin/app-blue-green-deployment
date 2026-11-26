@@ -1,5 +1,5 @@
 
-name: Deploy App Ecommerce
+name: Deploy Ecommerce Application
 
 on:
   push:
@@ -15,71 +15,68 @@ on:
 
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: deploy-app-ecommerce
-  cancel-in-progress: false
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  IMAGE_TAG: v.${{ github.run_number }}
+  NAMESPACE: ecommerce
+  CLUSTER: k3d-bluegreen-cluster
 
 jobs:
   build-and-deploy:
     name: Build, Push and Deploy
     runs-on: [self-hosted, Linux, X64]
 
-    env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      IMAGE_TAG: v.${{ github.run_number }}
-      NAMESPACE: ecommerce
-      CLUSTER: bluegreen-cluster
-
     steps:
-
       # ==========================================
-      # 1. CHECKOUT
+      # 1. CHECKOUT SOURCE CODE
       # ==========================================
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # ==========================================
-      # 2. CHECK KUBERNETES
+      # 2. CHECK KUBERNETES CONNECTION
       # ==========================================
-
       - name: Check Kubernetes Connection
         run: |
           set -e
 
-          kubectl config use-context "k3d-${CLUSTER}"
+          echo "===== KUBERNETES CONTEXT ====="
+          kubectl config use-context "$CLUSTER"
 
+          echo "===== CLUSTER INFORMATION ====="
           kubectl cluster-info
 
+          echo "===== KUBERNETES NODES ====="
           kubectl get nodes
 
       # ==========================================
-      # 3. VERIFY DOCKER HUB SECRETS
+      # 3. VALIDATE DOCKER HUB CONFIGURATION
       # ==========================================
-
-      - name: Verify Docker Hub Credentials
+      - name: Validate Docker Hub Secrets
         run: |
+          set -e
+
           if [ -z "$DOCKERHUB_USERNAME" ]; then
-            echo "ERROR: DOCKERHUB_USERNAME is missing"
+            echo "ERROR: DOCKERHUB_USERNAME is empty."
             exit 1
           fi
 
-          echo "Docker Hub username configured."
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "ERROR: DOCKERHUB_TOKEN is not configured."
+            exit 1
+          fi
+
+          echo "Docker Hub configuration is valid."
 
       # ==========================================
       # 4. SETUP DOCKER BUILDX
       # ==========================================
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       # ==========================================
-      # 5. LOGIN DOCKER HUB
+      # 5. LOGIN TO DOCKER HUB
       # ==========================================
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -87,14 +84,12 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ==========================================
-      # 6. BUILD BACKEND IMAGE
+      # 6. BUILD AND PUSH BACKEND
       # ==========================================
-
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v6
         with:
           context: ./ecommerce-app/backend
-          file: ./ecommerce-app/backend/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-backend:${{ env.IMAGE_TAG }}
@@ -103,14 +98,12 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       # ==========================================
-      # 7. BUILD FRONTEND IMAGE
+      # 7. BUILD AND PUSH FRONTEND
       # ==========================================
-
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v6
         with:
           context: ./ecommerce-app/frontend
-          file: ./ecommerce-app/frontend/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/ecommerce-app-frontend:${{ env.IMAGE_TAG }}
@@ -119,39 +112,43 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       # ==========================================
-      # 8. CREATE KUBERNETES NAMESPACE
+      # 8. CREATE NAMESPACE
       # ==========================================
-
-      - name: Prepare Kubernetes Namespace
+      - name: Apply Kubernetes Namespace
         run: |
+          set -e
+
           kubectl apply -f ecommerce-app/k8s/namespace.yaml
 
       # ==========================================
-      # 9. CREATE JWT SECRET
+      # 9. CREATE JWT SECRET IF NOT EXISTS
       # ==========================================
-
-      - name: Prepare JWT Secret
+      - name: Ensure Kubernetes Secret
         run: |
+          set -e
+
           if ! kubectl get secret ecommerce-secret \
             -n "$NAMESPACE" >/dev/null 2>&1; then
+
+            echo "Creating ecommerce-secret..."
 
             kubectl create secret generic ecommerce-secret \
               -n "$NAMESPACE" \
               --from-literal=JWT_SECRET="$(openssl rand -hex 32)"
-
-            echo "JWT Secret created."
-
           else
-            echo "JWT Secret already exists. Keeping existing secret."
+            echo "Existing ecommerce-secret found. Keeping it."
           fi
 
       # ==========================================
-      # 10. PREPARE PERSISTENT STORAGE
+      # 10. APPLY PERSISTENT STORAGE
       # ==========================================
-
-      - name: Prepare Persistent Storage
+      - name: Apply Persistent Storage
         run: |
+          set -e
+
           kubectl apply -f ecommerce-app/k8s/storage.yaml
+
+          echo "Waiting for PVC to become Bound..."
 
           kubectl wait \
             --for=jsonpath='{.status.phase}'=Bound \
@@ -159,27 +156,49 @@ jobs:
             -n "$NAMESPACE" \
             --timeout=180s
 
-      # ==========================================
-      # 11. PREPARE APPLICATION MANIFEST
-      # ==========================================
+          kubectl get pv
+          kubectl get pvc -n "$NAMESPACE"
 
-      - name: Prepare Application Manifest
+      # ==========================================
+      # 11. GENERATE KUBERNETES MANIFEST
+      # ==========================================
+      - name: Generate Deployment Manifest
         run: |
+          set -e
+
+          echo "======================================"
+          echo "GENERATING KUBERNETES MANIFEST"
+          echo "======================================"
+
+          echo "Docker Hub: $DOCKERHUB_USERNAME"
+          echo "Image version: $IMAGE_TAG"
+
           sed \
             -e "s|__DOCKERHUB_USERNAME__|${DOCKERHUB_USERNAME}|g" \
-            -e "s|__BACKEND_TAG__|${IMAGE_TAG}|g" \
-            -e "s|__FRONTEND_TAG__|${IMAGE_TAG}|g" \
-            ecommerce-app/k8s/app.yaml > /tmp/ecommerce-app.yaml
+            -e "s|__IMAGE_TAG__|${IMAGE_TAG}|g" \
+            ecommerce-app/k8s/app.yaml \
+            > /tmp/ecommerce-app.yaml
 
+          echo ""
           echo "===== GENERATED IMAGE REFERENCES ====="
 
           grep "image:" /tmp/ecommerce-app.yaml
 
+          # Stop deployment if any placeholder remains.
+          if grep -qE '__IMAGE_TAG__|__DOCKERHUB_USERNAME__' \
+            /tmp/ecommerce-app.yaml; then
+
+            echo "ERROR: Unreplaced image placeholder detected!"
+            exit 1
+          fi
+
+          echo ""
+          echo "Manifest generation successful."
+
       # ==========================================
       # 12. DEPLOY APPLICATION
       # ==========================================
-
-      - name: Deploy Application to Kubernetes
+      - name: Deploy Ecommerce Application
         run: |
           set -e
 
@@ -187,62 +206,75 @@ jobs:
           echo "DEPLOY ECOMMERCE APPLICATION"
           echo "======================================"
 
-          echo "Image version: ${IMAGE_TAG}"
+          echo "Image version: $IMAGE_TAG"
 
           kubectl apply -f /tmp/ecommerce-app.yaml
 
-          kubectl apply -f ecommerce-app/k8s/ingress.yaml
+          kubectl apply \
+            -f ecommerce-app/k8s/ingress.yaml
 
       # ==========================================
-      # 13. VERIFY BACKEND
+      # 13. WAIT FOR BACKEND ROLLOUT
       # ==========================================
-
-      - name: Verify Backend Rollout
+      - name: Wait for Backend Deployment
         run: |
+          set -e
+
           kubectl rollout status deployment/backend \
             -n "$NAMESPACE" \
             --timeout=180s
 
       # ==========================================
-      # 14. VERIFY FRONTEND
+      # 14. WAIT FOR FRONTEND ROLLOUT
       # ==========================================
-
-      - name: Verify Frontend Rollout
+      - name: Wait for Frontend Deployment
         run: |
+          set -e
+
           kubectl rollout status deployment/frontend \
             -n "$NAMESPACE" \
             --timeout=180s
 
       # ==========================================
-      # 15. VERIFY DEPLOYMENT
+      # 15. DEPLOYMENT SUMMARY
       # ==========================================
-
-      - name: Verify Kubernetes Resources
+      - name: Deployment Summary
+        if: always()
         run: |
+          echo "======================================"
+          echo "ECOMMERCE DEPLOYMENT SUMMARY"
+          echo "======================================"
+
+          echo ""
           echo "===== PODS ====="
-          kubectl get pods -n "$NAMESPACE" -o wide
+          kubectl get pods -n "$NAMESPACE" -o wide || true
 
+          echo ""
           echo "===== DEPLOYMENTS ====="
-          kubectl get deployments -n "$NAMESPACE"
+          kubectl get deployments -n "$NAMESPACE" || true
 
+          echo ""
           echo "===== SERVICES ====="
-          kubectl get services -n "$NAMESPACE"
+          kubectl get services -n "$NAMESPACE" || true
 
+          echo ""
+          echo "===== INGRESS ====="
+          kubectl get ingress -n "$NAMESPACE" || true
+
+          echo ""
           echo "===== PVC ====="
-          kubectl get pvc -n "$NAMESPACE"
+          kubectl get pvc -n "$NAMESPACE" || true
 
+          echo ""
           echo "===== DEPLOYED IMAGES ====="
           kubectl get deployments -n "$NAMESPACE" \
-            -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\n"}{end}'
-
-          echo "======================================"
-          echo "DEPLOYMENT SUCCESSFUL"
-          echo "======================================"
+            -o jsonpath='{range .items[*]}{.metadata.name}{": "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}' \
+            || true
 
       # ==========================================
-      # 16. LOGOUT DOCKER HUB
+      # 16. LOGOUT FROM DOCKER HUB
       # ==========================================
-
-      - name: Logout Docker Hub
+      - name: Docker Hub Logout
         if: always()
-        run: docker logout || true
+        run: |
+          docker logout || true

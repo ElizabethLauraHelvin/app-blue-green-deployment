@@ -29,7 +29,7 @@ spec:
       containers:
         - name: backend
 
-          image: elilaura/ecommerce-app-backend:__IMAGE_TAG__
+          image: __DOCKERHUB_USERNAME__/ecommerce-app-backend:__IMAGE_TAG__
           imagePullPolicy: Always
 
           ports:
@@ -131,7 +131,7 @@ spec:
       containers:
         - name: frontend
 
-          image: elilaura/ecommerce-app-frontend:__IMAGE_TAG__
+          image: __DOCKERHUB_USERNAME__/ecommerce-app-frontend:__IMAGE_TAG__
           imagePullPolicy: Always
 
           ports:
